@@ -67,4 +67,12 @@ peasants.hasPlayed = [true, true, true];
 peasants.finish(1);
 assert(peasants.baseScore === 12 && peasants.scoreDeltas[0] === -24 && peasants.scoreDeltas[1] === 12, "peasant win");
 
+const g2 = new Game({ id: "g2", mode: "friendly", users, rng: () => 0.2 });
+g2.bid(g2.turn, 1);
+assert(g2.lastAction.kind === "bid" && g2.lastAction.value === 1, "last bid");
+g2.becomeLandlord(0);
+const low = g2.hands[0][0];
+g2.play(0, [low.id]);
+assert(g2.lastAction.kind === "play" && g2.lastPlayer === 0, "last play");
+
 console.log("engine tests passed");

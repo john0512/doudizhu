@@ -1,6 +1,8 @@
 import { Game } from "./engine.mjs";
 import { ROOMS, formatRank, settleMatch, shuffleUsers } from "./ranks.mjs";
 
+export const TURN_MS = 20000;
+
 export class Match {
   constructor({ id, room, users, hands = 1, rng = Math.random }) {
     this.id = id;
@@ -19,6 +21,10 @@ export class Match {
     this.ready = [false, false, false];
     this.complete = false;
     this.placement = null;
+    this.turnTimer = null;
+    this.turnEndsAt = null;
+    this.nextHandTimer = null;
+    this.nextHandEndsAt = null;
     this.game = this.deal();
   }
 
@@ -106,12 +112,16 @@ export class Match {
       ready: this.ready,
       complete: this.complete,
       placement: this.placement,
+      turnMs: TURN_MS,
     };
   }
 
   publicState(viewerId) {
     const state = this.game.publicState(viewerId);
     state.match = this.publicMatch();
+    state.turnEndsAt = this.turnEndsAt;
+    state.nextHandEndsAt = this.nextHandEndsAt;
+    state.serverNow = Date.now();
     state.players = state.players.map((p, seat) => ({
       ...p,
       rankLabel: formatRank(this.users[seat].rank, this.users[seat].rankPoints),

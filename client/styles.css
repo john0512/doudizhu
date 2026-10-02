@@ -232,6 +232,14 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .hand .card.selected { transform: translateY(-18px); outline: 2px solid var(--gold); z-index: 2; }
 .turn-glow { box-shadow: 0 0 0 2px var(--gold); border-radius: 12px; padding: 8px; }
 .turn-hint { text-align: center; font-size: 14px; opacity: 0.85; margin-bottom: 6px; }
+.action-line {
+  text-align: center;
+  font-size: 15px;
+  font-weight: 650;
+  color: var(--gold);
+  margin: 4px 0 2px;
+}
+.turn-clock { color: var(--gold); font-weight: 700; font-variant-numeric: tabular-nums; }
 .card .rank { letter-spacing: -0.04em; }
 
 .overlay .panel p { text-align: center; }

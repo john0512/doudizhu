@@ -164,7 +164,12 @@ export class Game {
     this.baseScore = 0;
     this.scoreDeltas = [0, 0, 0];
     this.bidLog = [];
+    this.lastAction = null;
     this.connected = [true, true, true];
+  }
+
+  noteAction(kind, seat, extra = {}) {
+    this.lastAction = { kind, seat, username: this.usernames[seat], ...extra };
   }
 
   seatOf(userId) {
@@ -179,6 +184,7 @@ export class Game {
     if (![0, 1, 2, 3].includes(value)) throw new Error("Bid must be 0-3");
     if (value !== 0 && value <= this.highestBid) throw new Error("Bid must be higher");
     this.bidLog.push({ seat, value });
+    this.noteAction("bid", seat, { value });
     if (value === 0) {
       this.passedBids += 1;
       if (this.highestBidder == null && this.passedBids === 3) throw new AllPass();
@@ -225,6 +231,7 @@ export class Game {
     this.hands[seat] = hand.filter((c) => !used.has(c.id));
     this.lastCombo = combo;
     this.lastPlayer = seat;
+    this.noteAction("play", seat);
     this.passes = 0;
     this.hasPlayed[seat] = true;
     if (combo.kind === ComboKind.BOMB || combo.kind === ComboKind.ROCKET) this.bombCount += 1;
@@ -237,6 +244,7 @@ export class Game {
     if (this.phase !== "play") throw new Error("Not in play");
     if (seat !== this.turn) throw new Error("Not your turn");
     if (this.lastCombo == null || this.lastPlayer === seat) throw new Error("You must lead");
+    this.noteAction("pass", seat);
     this.passes += 1;
     if (this.passes >= 2) {
       this.lastCombo = null;
@@ -274,6 +282,7 @@ export class Game {
       bottom: this.phase === "bid" ? this.bottom.map(() => ({ hidden: true })) : this.bottom,
       lastCombo: this.lastCombo,
       lastPlayer: this.lastPlayer,
+      lastAction: this.lastAction,
       winnerSeat: this.winnerSeat,
       landlordWon: this.landlordWon,
       spring: this.spring,

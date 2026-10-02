@@ -18,6 +18,7 @@ let stats = { registered: 0, online: 0 };
 let statsTimer = null;
 let board = [];
 let boardLoaded = false;
+let turnClockTimer = null;
 
 function statsLine() {
   return `<p class="stats" id="stats">${stats.registered} registered · ${stats.online} online</p>`;
@@ -176,6 +177,16 @@ function connect() {
       if (!state || !Array.isArray(state.players)) return;
       view = "table";
       game = state;
+      if (game.turnEndsAt && game.serverNow) {
+        game.localTurnEnd = Date.now() + Math.max(0, game.turnEndsAt - game.serverNow);
+      } else {
+        game.localTurnEnd = 0;
+      }
+      if (game.nextHandEndsAt && game.serverNow) {
+        game.localNextHandEnd = Date.now() + Math.max(0, game.nextHandEndsAt - game.serverNow);
+      } else {
+        game.localNextHandEnd = 0;
+      }
       const mine = game.players[game.viewerSeat];
       if (mine && mine.hand) {
         const live = new Set(mine.hand.map((c) => c.id));
@@ -447,6 +458,46 @@ function renderRoom() {
   document.getElementById("leave").onclick = () => send({ type: "leave_room" });
 }
 
+function lastActionText() {
+  if (!game) return "";
+  const a = game.lastAction;
+  if (game.phase === "bid") {
+    if (!a || a.kind !== "bid") return "";
+    return a.value === 0 ? `${a.username} passed` : `${a.username} called ${a.value}`;
+  }
+  if (game.lastCombo && game.lastPlayer != null) {
+    const p = game.players[game.lastPlayer];
+    return `${p ? p.username : "Someone"} played`;
+  }
+  if (a && a.kind === "pass") return `${a.username} passed`;
+  if (a && a.kind === "bid") {
+    return a.value === 0 ? `${a.username} passed` : `${a.username} called ${a.value}`;
+  }
+  return "";
+}
+
+function tickTurnClock() {
+  const el = document.getElementById("turn-clock");
+  if (el) {
+    if (!game || game.phase === "over" || !game.localTurnEnd) el.textContent = "";
+    else el.textContent = `${Math.max(0, Math.ceil((game.localTurnEnd - Date.now()) / 1000))}s`;
+  }
+  const nextEl = document.getElementById("next-clock");
+  if (nextEl) {
+    if (!game || !game.localNextHandEnd) nextEl.textContent = "";
+    else nextEl.textContent = `${Math.max(0, Math.ceil((game.localNextHandEnd - Date.now()) / 1000))}s`;
+  }
+}
+
+function startTurnClock() {
+  if (turnClockTimer) clearInterval(turnClockTimer);
+  turnClockTimer = null;
+  tickTurnClock();
+  if (view === "table" && game && (game.localTurnEnd || game.localNextHandEnd)) {
+    turnClockTimer = setInterval(tickTurnClock, 250);
+  }
+}
+
 function seatMeta(p) {
   const landlord = p.isLandlord ? `<span class="badge">地主</span>` : "";
   const first = game.firstBidder === p.seat ? `<span class="badge ghost-badge">1st bid</span>` : "";
@@ -475,6 +526,8 @@ function renderTable() {
             ? "Beat the last play or pass"
             : "Lead a combo"
         : `Waiting for ${actor ? actor.username : "the next player"}`;
+  const actionText = lastActionText();
+  const clock = game.phase !== "over" ? `<span class="turn-clock" id="turn-clock"></span>` : "";
   const bottom = (game.bottom || []).map((c) => renderCard(c, { size: "small" })).join("");
   const pile = game.lastCombo
     ? game.lastCombo.cards.map((c) => renderCard(c)).join("")
@@ -521,7 +574,7 @@ function renderTable() {
                  <p>${match.rated ? "Rank points updated" : "Friendly — ranks unchanged"}</p>
                  <button class="primary" id="home">Back to lobby</button>`
               : `<p>Hand ${match.hand || 1} / ${match.totalHands || 1}${match.orbits ? ` · orbit ${match.orbit}/${match.orbits}` : ""}</p>
-                 <p>${(match.ready || []).filter(Boolean).length} ready</p>
+                 <p>${(match.ready || []).filter(Boolean).length} ready · next hand in <span id="next-clock"></span></p>
                  <button class="primary" id="next">Next hand</button>`
           }
         </div></div>`
@@ -542,7 +595,8 @@ function renderTable() {
       <div>
         <div class="opponents">${others.map(seatMeta).join("")}</div>
         <div class="pile">${pile}</div>
-        <div class="turn-hint">${turnHint}</div>
+        ${actionText ? `<div class="action-line">${actionText}</div>` : ""}
+        <div class="turn-hint">${turnHint}${clock ? ` · ${clock}` : ""}</div>
       </div>
       <div class="me">
         ${seatMeta(me)}
@@ -572,6 +626,7 @@ function renderTable() {
   if (home) home.onclick = () => send({ type: "lobby" });
   const next = document.getElementById("next");
   if (next) next.onclick = () => send({ type: "next_hand" });
+  startTurnClock();
 }
 
 function fmtDelta(n) {

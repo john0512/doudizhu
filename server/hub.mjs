@@ -1,5 +1,5 @@
 import { AllPass } from "./engine.mjs";
-import { Match } from "./match.mjs";
+import { Match, TURN_MS } from "./match.mjs";
 import * as db from "./db.mjs";
 import { ROOMS, canJoinRoom, joinError } from "./ranks.mjs";
 
@@ -186,12 +186,14 @@ export class Hub {
     } catch (err) {
       if (err instanceof AllPass) {
         match.redeal();
+        this.armTurn(match);
         this.broadcastMatch(match);
         this.broadcast(match, { type: "info", message: "All passed — redealing" });
         return;
       }
       return this.send(userId, { type: "error", message: err.message });
     }
+    this.armTurn(match);
     this.broadcastMatch(match);
   }
 
@@ -204,6 +206,7 @@ export class Hub {
       return this.send(userId, { type: "error", message: err.message });
     }
     if (match.game.phase === "over") this.finishHand(match);
+    this.armTurn(match);
     this.broadcastMatch(match);
   }
 
@@ -215,6 +218,7 @@ export class Hub {
     } catch (err) {
       return this.send(userId, { type: "error", message: err.message });
     }
+    this.armTurn(match);
     this.broadcastMatch(match);
   }
 
@@ -247,7 +251,11 @@ export class Hub {
     this.userRoom.delete(id);
     if (!mid) return;
     const match = this.matches.get(mid);
-    if (match && match.userIds.every((uid) => !this.userMatch.has(this.uid(uid)))) this.matches.delete(mid);
+    if (match && match.userIds.every((uid) => !this.userMatch.has(this.uid(uid)))) {
+      this.clearTurn(match);
+      this.clearNextHand(match);
+      this.matches.delete(mid);
+    }
   }
 
   startMatch(room, userIds, lobbyRoom = null) {
@@ -259,6 +267,7 @@ export class Hub {
       this.matches.set(match.id, match);
       if (lobbyRoom) lobbyRoom.match = match;
       for (const id of unique) this.userMatch.set(id, match.id);
+      this.armTurn(match);
       this.broadcastMatch(match);
       return true;
     } catch (err) {
@@ -277,6 +286,8 @@ export class Hub {
   }
 
   cancelMatch(match) {
+    this.clearTurn(match);
+    this.clearNextHand(match);
     for (const id of match.userIds) {
       this.userMatch.delete(id);
       this.userRoom.delete(id);
@@ -295,15 +306,99 @@ export class Hub {
   }
 
   finishHand(match) {
+    this.clearTurn(match);
     const result = match.finishHand();
     if (result === "match" && match.rated && match.placement) {
       db.applyRankResults(match.placement);
     }
+    if (result === "hand") this.armNextHand(match);
+    else this.clearNextHand(match);
   }
 
   advanceHand(match) {
+    this.clearNextHand(match);
     match.nextHand();
+    this.armTurn(match);
     this.broadcastMatch(match);
+  }
+
+  clearTurn(match) {
+    if (!match) return;
+    if (match.turnTimer) clearTimeout(match.turnTimer);
+    match.turnTimer = null;
+    match.turnEndsAt = null;
+  }
+
+  armTurn(match) {
+    this.clearTurn(match);
+    const game = match.game;
+    if (!game || game.phase === "over") return;
+    const seat = game.turn;
+    const token = Date.now();
+    match.turnEndsAt = token + TURN_MS;
+    match.turnTimer = setTimeout(() => this.onTurnTimeout(match, seat, token), TURN_MS);
+  }
+
+  onTurnTimeout(match, seat, token) {
+    try {
+      if (!this.matches.get(match.id) || match.game.turn !== seat || match.game.phase === "over") return;
+      if (match.turnEndsAt !== token + TURN_MS) return;
+      this.autoAct(match, seat);
+      if (match.game.phase === "over") this.finishHand(match);
+      this.armTurn(match);
+      this.broadcastMatch(match);
+    } catch (err) {
+      if (err instanceof AllPass) {
+        match.redeal();
+        this.armTurn(match);
+        this.broadcastMatch(match);
+        this.broadcast(match, { type: "info", message: "All passed — redealing" });
+        return;
+      }
+      console.error("onTurnTimeout", err);
+    }
+  }
+
+  autoAct(match, seat) {
+    const game = match.game;
+    if (game.phase === "bid") {
+      game.bid(seat, 0);
+      return;
+    }
+    if (game.phase !== "play") return;
+    const leading = game.lastCombo == null || game.lastPlayer === seat;
+    if (leading) {
+      const card = game.hands[seat][0];
+      if (card) game.play(seat, [card.id]);
+      return;
+    }
+    game.pass(seat);
+  }
+
+  clearNextHand(match) {
+    if (!match) return;
+    if (match.nextHandTimer) clearTimeout(match.nextHandTimer);
+    match.nextHandTimer = null;
+    match.nextHandEndsAt = null;
+  }
+
+  armNextHand(match) {
+    this.clearNextHand(match);
+    if (!match.game || match.game.phase !== "over" || match.complete) return;
+    const token = Date.now();
+    match.nextHandEndsAt = token + TURN_MS;
+    match.nextHandTimer = setTimeout(() => this.onNextHandTimeout(match, token), TURN_MS);
+  }
+
+  onNextHandTimeout(match, token) {
+    try {
+      if (!this.matches.get(match.id)) return;
+      if (match.nextHandEndsAt !== token + TURN_MS) return;
+      if (match.complete || match.game.phase !== "over") return;
+      this.advanceHand(match);
+    } catch (err) {
+      console.error("onNextHandTimeout", err);
+    }
   }
 
   roomSnapshot(room) {
